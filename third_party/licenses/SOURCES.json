@@ -1,0 +1,37 @@
+[
+  {
+    "component": "Arduino stk500boot.c",
+    "url": "https://raw.githubusercontent.com/arduino/Arduino-stk500v2-bootloader/06ebf3701162b7b7c557dd64bc10796507dbada5/stk500boot.c",
+    "path": "third_party/arduino-stk500v2/stk500boot.c",
+    "sha256": "1bea8e6b698919364eb571e6df57689ea662d00f81131611c1aab4aef28d75ce",
+    "checked": "2026-09-18"
+  },
+  {
+    "component": "avr-libc license",
+    "url": "https://raw.githubusercontent.com/avrdudes/avr-libc/avr-libc-2_0_0-release/LICENSE",
+    "path": "third_party/licenses/avr-libc-2.0.0-LICENSE.txt",
+    "sha256": "5637a1aea5eb9c3a379611c6380b49653f68f9ffe0e1df0b7f5d6f12ecf278ef",
+    "checked": "2026-09-18"
+  },
+  {
+    "component": "GCC runtime exception",
+    "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-7.3.0/COPYING.RUNTIME",
+    "path": "third_party/licenses/GCC-7.3.0-COPYING.RUNTIME",
+    "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "checked": "2026-09-18"
+  },
+  {
+    "component": "GCC GPLv3",
+    "url": "https://raw.githubusercontent.com/gcc-mirror/gcc/releases/gcc-7.3.0/COPYING3",
+    "path": "third_party/licenses/GCC-7.3.0-COPYING3",
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "checked": "2026-09-18"
+  },
+  {
+    "component": "GCC AVR runtime attribution excerpt",
+    "url": "https://github.com/gcc-mirror/gcc/blob/releases/gcc-7.3.0/libgcc/config/avr/lib1funcs.S",
+    "path": "third_party/licenses/GCC-AVR-NOTICE.txt",
+    "sha256": "21422c009951ed33270167738458f79354aa0c69e255f81b7d04d8e5167efc4a",
+    "checked": "2026-09-18"
+  }
+]

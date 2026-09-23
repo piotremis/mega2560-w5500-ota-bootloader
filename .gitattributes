@@ -1,0 +1,13 @@
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.inc text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+Makefile text eol=lf
+*.elf binary
+*.zip binary
+third_party/arduino-stk500v2/*.c -text
+third_party/arduino-stk500v2/*.h -text
+third_party/licenses/* -text
+LICENSE -text

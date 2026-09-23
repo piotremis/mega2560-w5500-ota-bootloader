@@ -1,0 +1,8 @@
+build/
+dist/
+reference/
+__pycache__/
+bootloader.elf.ltrans*
+bootloader.res
+.ruff_cache/
+.venv/

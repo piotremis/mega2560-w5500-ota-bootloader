@@ -1,0 +1,51 @@
+name: Build and tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check vendored source integrity
+        run: python3 tools/check_sources.py
+      - name: Run production C parser and recovery tests
+        run: python3 -X faulthandler tests/run.py
+      - name: Run SPI and W5500 model tests
+        run: python3 tests/w5500.py
+      - name: Show test log even after a native crash
+        if: always()
+        run: cat build/tests/results.txt 2>/dev/null || true
+  avr-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Arduino AVR toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/avr-gcc.tar.bz2"
+          curl --fail --location --retry 3 'https://downloads.arduino.cc/tools/avr-gcc-7.3.0-atmel3.6.1-arduino7-x86_64-pc-linux-gnu.tar.bz2' -o "$archive"
+          echo "bd8c37f6952a2130ac9ee32c53f6a660feb79bee8353c8e289eb60fdcefed91e  $archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/avr-toolchain"
+          tar -xjf "$archive" -C "$RUNNER_TEMP/avr-toolchain" --strip-components=1
+          echo "$RUNNER_TEMP/avr-toolchain/bin" >> "$GITHUB_PATH"
+      - name: Verify sources and licenses
+        run: python3 tools/check_sources.py
+      - name: Build AVR and enforce Flash bounds
+        run: make all
+      - name: Test linker limit and C/C++ application integration
+        run: |
+          python3 tests/link_limit.py
+          python3 tests/application_build.py
+      - name: Package and rebuild release from ZIP
+        run: |
+          python3 tools/package.py
+          python3 tools/verify_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mega2560-bootloader-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            dist/mega2560_ota_bootloader.zip
+            dist/SHA256SUMS.txt

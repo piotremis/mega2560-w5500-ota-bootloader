@@ -2,10 +2,19 @@
 
 This firmware has a hard **8192-byte** Flash limit. UART0/CH340 upload and W5500
 OTA were tested successfully on hardware on 2026-09-22. Power-loss and fault
-injection acceptance remain separate items. Describe the problem and expected behaviour when opening an issue or PR;
+injection acceptance remain separate items. Describe the problem and expected behavior when opening an issue or PR;
 include the board wiring, toolchain version and relevant test output.
 
 ## Development checks
+
+Use a topic branch and open a pull request against `main`. Both `host-tests` and
+`avr-release` must pass on an up-to-date branch. Merge with squash; direct pushes,
+force pushes and branch deletion are blocked by the main protection policy.
+
+Maintain project documentation in English. Use [docs/README.md](docs/README.md)
+as the navigation index. Keep numeric limits consistent with code and distinguish
+measured results from acceptance work. Edit `tools/report.py` for generated
+memory-report wording; do not translate or reformat original third-party notices.
 
 GitHub Actions runs host models and a pinned AVR-GCC 7.3.0 build on Ubuntu.
 It checks ELF/HEX bounds, negative linker cases, C/C++ application integration
@@ -34,8 +43,8 @@ GPL-2.0-or-later license for contributions. Do not add a copyright holder's name
 without their authorization.
 
 Before publishing a release, complete the hardware checklist in
-[docs/TESTING.md](docs/TESTING.md), or clearly label the release as awaiting
-hardware validation. Publish matching sources and third-party license notices
+[docs/TESTING.md](docs/TESTING.md), or state which acceptance tests remain pending
+alongside the hardware tests already completed. Publish matching sources and third-party license notices
 alongside binaries. The archive does not contain a compiler toolchain.
 
 Do not run simultaneous builds: GCC LTO writes shared temporary files. Source

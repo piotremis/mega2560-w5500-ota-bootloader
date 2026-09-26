@@ -1,77 +1,106 @@
-# Walidacja i ograniczenia dowodów
+# Validation and test scope
 
-## Wykonano
+[Documentation](README.md) / Validation
 
-| Warstwa | Wynik / dowód |
+## Evidence summary
+
+| Layer | Evidence |
 |---|---|
-| verified by compilation | AVR-GCC 7.3.0, ATmega2560/16 MHz, GNU make; finalne źródła z `-Wall -Wextra -Werror`; ELF, HEX, MAP i raporty |
-| verified by static analysis | przegląd zakresów SPM, 32-bitowego adresowania, stanu PENDING i parserów; disassembly i ELF/LMA; nie jest to formalny dowód ani wynik komercyjnego analizatora |
-| simulated/tested | produkcyjny kod C kompilowany na hosta, podstawione wyłącznie I/O; testy CRC, URL, HTTP, DNS, DHCP, EEPROM, Flash, OTA i STK |
-| protocol integration | prawdziwy avrdude 8.0-arduino.1, backend wiring, zapis+odczyt+verify 248 KiB Flash i 4 KiB EEPROM przez hostową implementację transportu UART/TCP |
-| driver model | produkcyjny w5500.c z modelem SPI/rejestrów/socket/ring-buffer; timeouty, MAC, UDP header, zawijanie |
-| hardware tested | Upload przez UART0/CH340 i OTA przez W5500 przetestowano na docelowym sprzęcie 2026-09-22 — obie ścieżki działają poprawnie. Wcześniej starszą rewizję 8122 B zapisano przez AVRISP mkII oraz zweryfikowano Flash i fuse/lock. |
+| Compilation | AVR-GCC 7.3.0; ATmega2560/16 MHz; warnings treated as errors for final sources; ELF/HEX/MAP and size checks |
+| Static review | SPM bounds, 32-bit addresses, EEPROM policy and parser review; disassembly and ELF load addresses; not a formal proof |
+| Host models | Production C with substituted hardware I/O; CRC, URL, HTTP, DNS, DHCP, EEPROM, Flash, OTA and STK tests |
+| Protocol integration | Real avrdude 8.0-arduino.1 wiring upload/verify of 248 KiB Flash and 4 KiB EEPROM through a host UART/TCP model |
+| Driver model | Production W5500 driver with SPI/register/socket/ring-buffer model |
+| Hardware | UART0/CH340 upload and W5500 OTA tested successfully on 2026-09-22; earlier ISP testing verified an 8122-byte revision and fuse/lock settings |
+| Release archive | ZIP checksums and source hashes verified; rebuild in a fresh directory produced identical HEX |
 
-Testy nie wykonują ELF w emulatorze instrukcji AVR. Nie zastępują pomiaru SPI, rzeczywistego SPM, zegara, CH340, auto-resetu, PHY/linku ani brown-out. Sukces kompilacji nie jest uznany za sukces na sprzęcie.
+Host tests do not emulate AVR instructions or replace measurement of SPI, SPM,
+clock timing, auto-reset, PHY/link behavior or brown-out. A successful build is
+not hardware acceptance. Ordinary upload and OTA operation are hardware-tested;
+power-loss, fault-injection and boundary acceptance remain separate work.
 
-Sprawdzono również dostarczane archiwum: rozpakowano ZIP do nowego katalogu, wykonano ponowny build AVR i otrzymano identyczny bajtowo HEX. Log: `build/tests/release.txt`. Archiwum zawiera manifest SHA256 wszystkich dołączonych plików; ZIP CRC i SHA256 zweryfikowano po utworzeniu. Pobierane kompilatory, cache i zagnieżdżone katalogi `.git` są wyłączone z paczki.
+## Run software checks
 
-## Software
+Use `./build.ps1` on Windows, or `make all` followed by `make test` with the
+required tools installed. [Installation](INSTALL.md) lists dependencies.
 
-Regresje publikacyjne: linkowanie API C z programem C++ (także cfg_load/CRC),
-zgodność walidacji URL generatora i API, odrzucenie portu 0/niepoprawnego IPv4
-przed jakimkolwiek zapisem EEPROM oraz zachowanie poprawnego URL bez zmian.
-CI buduje AVR-GCC 7.3.0, kontroluje limit Flash i przebudowuje ZIP.
-
-Na Linuxie model hosta jest linkowany z `-Wl,-Bsymbolic`, aby jego wewnętrzne
-wywołania `crc32(data, size)` nie trafiły do eksportowanej przez zlib funkcji
-o tej samej nazwie i innym ABI. Testy celowo udostępniają symbole zlib globalnie,
-aby sprawdzać tę kolizję. Flaga dotyczy wyłącznie biblioteki testowej, nie AVR.
-Zobacz [opis opcji GNU ld](https://sourceware.org/binutils/docs/ld/Options.html).
-CI uruchamia Python z `-X faulthandler` i pokazuje częściowy log po awarii.
-
-`make test` uruchamia:
-
-- `tests/run.py`: 27 grup unittest rzeczywistych funkcji C, ponad 2000 deterministycznych pakietów fuzz, wszystkie ucięcia odpowiedzi DHCP/DNS, CRC32 kontra zlib, parser portu/URL, nagłówki i overflow Content-Length, pola/CRC EEPROM, 256 wartości stanu startowego, przerwanie każdego zapisu EEPROM przy przygotowaniu żądania z rekordu pustego oraz IDLE, zakresy Flash, STK komendy, checksum/token/length/sequence ramek, `!!!` bez monitora. Testy sprawdzają brak zapisów przy pustym/uszkodzonym EEPROM, ochronę PENDING/ARMING, fabryczny IDLE, mapowanie S/N na MAC, odrzucenie niepoprawnego S/N oraz zachowanie tożsamości przy żądaniu OTA.
-- Pełny łańcuch DHCP → DNS → HTTP → Flash → CRC na modelu: obrazy 1/255/256/257/700/253952 B, TCP podzielony na 17-bajtowe fragmenty, błędny CRC, błędny readback, przerwanie po 2 stronach i ponowienie, 404, brak/duplikat/rozbieżny Content-Length, chunked, ucięcie body, brak DHCP/DNS.
-- `tests/w5500.py`: model rejestrów, MAC z argumentu, UDP 68, TCP connect, odczyt datagramu, RX/TX na granicach 2048 i 65536, odrzucanie za dużego datagramu, timeout SEND i wiszącej komendy. Sprawdza CS jako aktywne-niskie wyjście podczas każdego bajtu SPI, sprzętowy SS jako wyjście oraz stany GPIO po transakcji. Warianty: domyślny D53 i CS na innym porcie; pozostałe bity portu pozostają bez zmian.
-- `tests/link_limit.py`: celowo zbyt duże `.text` oraz inicjalizatory `.data`; linker musi zwrócić błąd, co potwierdza, że sprawdzany jest też Flash używany przez dane RAM.
-
-`python tests/avrdude.py` jest osobnym testem integracyjnym Windows/Arduino15. Pełny trace i stdout są w `build/tests`. Nie korzysta z portu COM i nie zmienia urządzenia. W repo zawarto testy/źródła modelu; kompilator hostowy jest zależnością zewnętrzną, nie częścią firmware.
-
-## SRAM i stos
-
-Statyczny SRAM finalnego ELF: 1205 B = `.data` 160 B + `.bss` 1045 B. Największe bufory: wspólny pakiet 600 B, strona Flash/linia HTTP 256 B, Config 160 B. URL jest częścią Config. Bufory 2 KiB W5500 są pamięcią kontrolera i nie wchodzą do 1205 B. Brak malloc, VLA, rekursji i przerwań w bootloaderze.
-
-Pozostaje 6987 B **przed stosem**. GCC 7 z LTO emituje rzeczywiste ramki dopiero do `build/final/bootloader.elf.ltrans0.ltrans.su` (źródłowe `.su` są puste). Ramki zmieniają się z optymalizacją LTO; plik .su nie daje samodzielnie maksimum całego stosu. Budżet 512 B na stos daje duży zapas (6475 B pozostałego SRAM), ale **nie jest pomiarem high-water mark ani formalnie wyznaczonym maksimum stosu**. Zmierz watermark w wariancie diagnostycznym na sprzęcie przed wdrożeniem. Brak przerwań usuwa nieprzewidywalny narzut ISR.
-
-## Hardware acceptance — dla bieżącej rewizji
-
-**Przetestowano na sprzęcie 2026-09-22:** upload przez UART0/CH340 oraz OTA przez
-W5500. Obie ścieżki działają poprawnie. Testy utraty zasilania, wymuszonych błędów
-i wartości granicznych pozostają do wykonania w ramach poniższej listy.
-
-| Test | Kryterium zaliczenia |
+| Check | Coverage |
 |---|---|
-| ISP / fuse / lock | ELF/HEX tylko w boot; odczyt HFUSE D8, poprawny zegar i lock; start pod 0x3E000 |
-| Arduino IDE → CH340 | auto-reset, sign-on, upload małego i >128 KiB szkicu, poprawne verify i start aplikacji |
-| EEPROM przez UART | zapis/odczyt niskich i wysokich adresów, zachowanie rezerwacji |
-| W5500 na SPI | CS D53 (PB0), SS D53 jako output, VERSIONR=4, poprawne przebiegi SPI |
-| normalne OTA | DHCP DISCOVER/OFFER/REQUEST/ACK, DNS A, HTTP GET, CRC pobrania/readback, IDLE i start |
-| reset podczas OTA | reset w każdej fazie oraz w 1./środkowej/ostatniej stronie; PENDING i pobranie od 0 |
-| power loss | wielokrotne odcięcie VCC podczas EEPROM commit, SPM i weryfikacji; nigdy start częściowej aplikacji |
-| błędny CRC/readback | LED błędu, PENDING, brak skoku do aplikacji |
-| firmware >253952 B | odrzucenie przed programowaniem; boot niezmieniony |
-| firmware dokładnie 253952 B | 992 strony, ostatnia pod 0x3DF00, poprawny CRC i brak zmian w boot |
-| DNS niedostępny | timeout/retry, brak startu częściowej aplikacji, możliwość UART recovery |
-| serwer HTTP niedostępny / link down | timeout/retry i zachowanie PENDING |
-| HTTP 404 / brak Content-Length | błąd przed pierwszym SPM |
-| niepełne body | błąd, ponowienie, PENDING |
-| długi transfer i wrap W5500 | poprawne >64 KiB oraz wielokrotne zawinięcie TX/RX |
-| stos/zasilanie | watermark SRAM, VCC/BOD/supervisor, brak niekontrolowanego działania podczas spadku zasilania |
-| boot protection | odczyt boot przez ISP i porównanie checksum przed/po testach, w tym złośliwych adresach UART |
+| `tools/check_sources.py` | Pinned Arduino source, license/source hashes, replacement-header notices and excluded upstream headers |
+| `tests/run.py` | 27 test groups; production parsers, serial framing, update policy and recovery |
+| `tests/w5500.py` | Default D53 and alternate CS; GPIO states, MAC, sockets, UDP framing, RX/TX wrap and timeouts |
+| `tests/link_limit.py` | Deliberately oversized text and data initializers must fail linking |
+| `tests/application_build.py` | C and C++ callers linked against C API objects; cfg_load, CRC, request and watchdog example |
+| `tools/verify_release.py` | Archive hashes, source integrity, fresh AVR build and identical HEX |
 
-Do każdego testu sprzętowego zapisz model płytki/W5500, fuse, napięcie, toolchain i hash HEX, log avrdude, log serwera/pcap oraz wynik. Dopiero po tych testach można oznaczyć wydanie jako zwalidowane sprzętowo.
+Parser tests include over 2000 deterministic fuzz packets, every truncation of
+sample DHCP/DNS replies, CRC against zlib, URL/port validation, HTTP lengths and
+overflow. EEPROM tests cover 256 boot-state values, interruption at every write
+while preparing a request from blank/IDLE records, PENDING/ARMING preservation,
+factory identity mapping, and invalid metadata without automatic writes.
+Invalid URLs must be rejected before any EEPROM write; valid URLs remain intact.
 
-Testy IPv4 obejmują oktety graniczne, niepoprawne liczby i liczbę oktetów, dziesiętne zera wiodące oraz brak pakietów DNS. Pełne OTA po IP przechodzi przy braku odpowiedzi DNS, z portem 80 i 8080; sprawdzane są adres TCP, port i Host header. Nazwa 123.example.com nadal generuje DNS.
+End-to-end models cover DHCP -> DNS -> HTTP -> Flash -> CRC with images of
+1, 255, 256, 257, 700 and 253952 bytes, including 17-byte receive fragments.
+Cases include CRC/readback failure, interruption after two pages and retry,
+404, missing/duplicate/mismatched Content-Length, chunking, truncated body,
+unavailable DHCP/DNS, IPv4 without DNS, ports 80/8080, forced static IP and fallback.
+Tests inspect the destination address, port and Host header. Numeric-prefix
+hostnames still use DNS; IPv4 accepts decimal leading zeroes and rejects bad octets.
 
-Testy sieci statycznej: wymuszenie bez pakietów DHCP, fallback po timeout DHCP, preferencja poprawnego DHCP, DNS z konfiguracji statycznej, jednoczesny brak DHCP/DNS dla URL z IP, CRC wszystkich nowych pól oraz odrzucenie nieznanego trybu.
+STK tests exercise commands, frame checksum/token/length/sequence and `!!!` without
+monitor activation. The W5500 model checks 2048-byte ring and 65536-byte pointer
+wrap, oversized datagrams, SEND timeout, stuck commands, hardware SS as output,
+CS active-low during each SPI byte and preservation of unrelated GPIO bits.
+
+Run `python tests/avrdude.py` separately on Windows with Arduino15 avrdude installed,
+after `tests/run.py`. It uses loopback rather than a COM port and does not access
+a device. Logs and traces are written under `build/tests/`.
+
+On Linux, `-Wl,-Bsymbolic` binds model symbols locally so the firmware's two-argument
+`crc32()` cannot resolve to zlib's incompatible C ABI. The test deliberately loads
+zlib globally to exercise this condition. This flag does not affect AVR firmware.
+See [GNU ld options](https://sourceware.org/binutils/docs/ld/Options.html).
+CI enables Python faulthandler and prints partial logs after failure. It also
+builds with pinned AVR-GCC, checks bounds and rebuilds the release archive.
+
+## SRAM and stack
+
+Static SRAM is 1205 bytes: 160 bytes of `.data` and 1045 bytes of `.bss`.
+The largest objects are the 600-byte packet buffer, 256-byte Flash page/HTTP line
+buffer and 160-byte Config (including URL). W5500 buffers are controller memory.
+The bootloader uses no heap allocation, VLAs, recursion or interrupts.
+
+6987 bytes remain before stack use. GCC 7 LTO emits frame information in
+`build/final/bootloader.elf.ltrans0.ltrans.su`; source-level `.su` files may be empty.
+These frames alone do not prove maximum stack depth. A hypothetical 512-byte
+stack budget leaves 6475 bytes, but this is not a measured high-water mark.
+Measure stack watermark in a diagnostic hardware build before deployment.
+
+## Hardware acceptance checklist
+
+Successful UART upload and ordinary W5500 OTA do not imply completion of every
+case below. Record board/module model, fuses, voltage, toolchain, HEX hash,
+avrdude output, server logs/packet capture and result for each case.
+
+| Test | Acceptance criterion |
+|---|---|
+| ISP/fuses/lock | Boot-only ELF/HEX; HFUSE D8; correct clock/lock; startup at 0x3E000 |
+| CH340 upload | Auto-reset, sign-on, small and >128 KiB sketches, verify and application startup |
+| UART EEPROM | Read/write low and high addresses; application honors reserved record |
+| W5500 SPI | D53/PB0 CS; hardware SS output; VERSIONR=4; valid waveforms |
+| Ordinary OTA | DHCP, DNS, HTTP, download/readback CRC, IDLE and application startup |
+| Reset during OTA | Reset in every phase and first/middle/last page; PENDING and restart from zero |
+| Power loss | Repeated cuts during EEPROM commit, SPM and verification; no partial application startup |
+| Bad CRC/readback | Error LED, retained PENDING, no application jump |
+| Image >253952 bytes | Reject before programming; boot unchanged |
+| Image exactly 253952 bytes | 992 pages, last at 0x3DF00; correct CRC and boot unchanged |
+| DNS unavailable | Timeout/retry; no partial application startup; UART recovery available |
+| HTTP unavailable/link down | Timeout/retry and retained PENDING |
+| HTTP 404/missing length | Fail before first SPM write |
+| Truncated body | Fail, retry, preserve PENDING |
+| Long transfer | Correct >64 KiB operation and repeated RX/TX wrap |
+| Stack/power | Measure watermark and VCC/BOD/supervisor behavior during voltage drops |
+| Boot protection | Compare ISP boot checksums before/after, including invalid UART addresses |
+
+A full production acceptance claim requires completion of the applicable checklist.

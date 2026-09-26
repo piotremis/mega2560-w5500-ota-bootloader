@@ -1,4 +1,8 @@
-# Preparing a release
+# Release process
+
+[Documentation](README.md) / Releases
+
+## Build and verify
 
 Run these commands sequentially from the project directory, with the documented
 AVR toolchain. GCC's LTO temporary files are shared: do not run simultaneous builds.
@@ -22,6 +26,8 @@ provisioning records, hardware logs, intermediate firmware and research clones.
 Archive verification checks hashes, rebuilds in a temporary directory and compares
 the HEX byte for byte. Temporary verification directories are removed afterwards.
 
+## Publication checklist
+
 Before publishing:
 
 1. Confirm Flash <=8192 bytes and load addresses within 0x3E000–0x3FFFF.
@@ -34,6 +40,8 @@ Before publishing:
    Use the matching-source ZIP and do not redistribute earlier development archives
    as the current release. See LICENSES.md.
 
+## CI artifacts
+
 CI downloads Arduino AVR-GCC `7.3.0-atmel3.6.1-arduino7` for x86_64 Linux from
 `downloads.arduino.cc`, verifies SHA256
 `bd8c37f6952a2130ac9ee32c53f6a660feb79bee8353c8e289eb60fdcefed91e`
@@ -43,6 +51,8 @@ the complete matching-source ZIP and checksum, including runtime license notices
 
 This workflow prepares local artifacts; it does not create a repository or upload
 anything to GitHub. Development format v1 may change; do not imply migration support.
+
+## Tool discovery and portable paths
 
 Python is resolved from `-Python` or PATH (`python`, `python3`, `py`); no editor
 runtime is required. AVR tools are resolved from `AVR_PREFIX`, PATH or the Arduino

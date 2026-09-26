@@ -1,101 +1,110 @@
-# Kompilacja i instalacja — Windows / AVRISP mkII
+# Build and installation
 
-## 1. Przygotowanie
+[Documentation](README.md) / Installation
 
-Potrzebne są Python 3.9+, PowerShell i narzędzia Arduino AVR: `avr-gcc`, avr-libc,
-binutils oraz avrdude. Sprawdzony toolchain to
-`7.3.0-atmel3.6.1-arduino7`, avrdude `8.0.0-arduino1`.
-Skrypty wykrywają instalację w `%LOCALAPPDATA%/Arduino15`.
-Nie wymagają GNU make. Własną instalację AVR można wskazać przez `AVR_PREFIX`,
-np. `C:/avr/bin/`; inny kompilator może zmienić rozmiar firmware.
+## Requirements
 
-Otwórz PowerShell w katalogu projektu. Dla testów Windows pobierz Zig:
+Target: ATmega2560, 16 MHz, 8 KiB boot section. Install Python 3.9+,
+PowerShell, Arduino AVR-GCC `7.3.0-atmel3.6.1-arduino7` (including avr-libc
+and binutils), and avrdude `8.0.0-arduino1`. A different compiler may change
+firmware size. Windows scripts detect tools under `%LOCALAPPDATA%/Arduino15`;
+set `AVR_PREFIX` to a tool directory such as `C:/avr/bin/` to override detection.
+GNU make is optional on Windows. Run commands from the repository root.
+
+Download the host-test compiler once, then build:
 
 ```powershell
 python -m pip download ziglang==0.13.0 --dest build/tool-download
-```
-
-## 2. Kompilacja i testy
-
-```powershell
 .\build.ps1
 ```
 
-Powstają `build/final/bootloader.hex`, `.elf`, `.map` i raporty rozmiaru.
-Build przerywa się, jeżeli kod/dane Flash wyjdą poza `0x3E000–0x3FFFF`.
-Każde uruchomienie kompiluje źródła ponownie; czyszczenie nie jest wymagane.
-Nie uruchamiaj kilku buildów jednocześnie (wspólne pliki tymczasowe LTO).
+On Linux, with the AVR tools and a native C compiler on PATH:
 
-## 3. Połączenia
+```sh
+make all
+make test
+```
 
-AVRISP mkII podłącz do ICSP docelowego Mega: RESET, MOSI, MISO, SCK, GND
-oraz VTG do zasilania celu. Zapewnij zasilanie płytki; nie zakładaj, że programator
-ją zasila. Pierwsza instalacja i wymiana bootloadera wymagają ISP.
-CH340 służy do późniejszego uploadu aplikacji.
+The build produces ELF, HEX, MAP and reports in `build/final/`. It rejects
+Flash load addresses outside `0x3E000–0x3FFFF`. Each invocation recompiles the
+sources. Do not run concurrent builds: GCC LTO uses shared temporary filenames.
+Only install `build/final/bootloader.hex`; intermediate stages are measurements.
 
-| W5500 | Mega2560 |
+## Wiring
+
+Connect AVRISP mkII to the target ICSP: RESET, MOSI, MISO, SCK, GND and VTG.
+Supply target power separately; do not assume the programmer supplies it.
+Initial installation and bootloader replacement require ISP. CH340 is used for
+subsequent application uploads.
+
+| W5500 signal | Mega2560 pin |
 |---|---|
-| CS | **D53 / PB0**, aktywny niski |
+| CS, active low | **D53 / PB0** |
 | SCK | D52 / PB1 |
 | MOSI | D51 / PB2 |
 | MISO | D50 / PB3 |
-| GND | wspólna masa |
+| GND | Common ground |
 
-Zasilanie/poziomy logiczne dobierz do modułu W5500. RSTn wymaga poprawnego resetu
-sprzętowego; bootloader wykonuje także reset programowy. INT nie jest używany.
-CS jest konfigurowalny w [board_pins.h](../src/board_pins.h); sprzętowe SPI ma
-stałe piny. Inne urządzenia na SPI muszą mieć nieaktywne CS. Brak obsługi SD.
+Match power and logic levels to the W5500 module. RSTn needs a valid hardware
+reset circuit; the driver also performs a software reset. INT is unused.
+Configure CS in [board_pins.h](../src/board_pins.h); hardware SPI pins are fixed.
+Keep other SPI devices deselected. The bootloader does not support SD cards.
 
-## 4. Wgranie bootloadera i EEPROM
+## Program the bootloader and factory EEPROM
 
-**Operacja kasuje aplikację i może skasować EEPROM.** Numer seryjny musi być
-unikalną liczbą dziesiętną 1–65535. Dla pierwszego urządzenia:
+**This operation erases the application and may erase EEPROM.** Assign a unique
+decimal serial number from 1 to 65535:
 
 ```powershell
 .\buildAndProgram.ps1 -SerialNumber 0001
 ```
 
-Skrypt kolejno:
+The script:
 
-1. Generuje i waliduje fabryczny IDLE w EEPROM, wykonuje build/testy.
-2. Odczytuje sygnaturę celu (ATmega2560: `1E 98 01`).
-3. Kasuje Flash i ustawia fuse `LF=FF`, `HF=D8`, `EF=FD` dla Mega 16 MHz/boot 8 KiB.
-4. W jednej sesji ISP zapisuje i weryfikuje EEPROM, następnie Flash.
-5. Ustawia lock `0F`, ponownie weryfikuje Flash/EEPROM i odczytuje fuse.
+1. Generates and validates an IDLE EEPROM record, then builds and tests.
+2. Checks the ATmega2560 signature (`1E 98 01`).
+3. Erases Flash and writes fuses `LF=FF`, `HF=D8`, `EF=FD` for this target.
+4. Writes and verifies EEPROM and Flash in one ISP session.
+5. Sets lock bits to `0F`, verifies both memories again and reads back fuses.
 
-Każdy błąd przerywa dalsze kroki. Nie stosujemy `-F` ani wyłączania weryfikacji.
-Lock może być odczytany jako `CF` przez nieużywane bity. Ustawienie lock następuje
-po poprawnym zapisie, aby chronić Boot Loader Section.
+Any failure stops the sequence. Verification is enabled; `-F` is never used.
+Unused lock bits can make the readback appear as `CF`. Boot protection is set
+only after successful programming. Maintain stable power throughout installation.
 
-S/N 0001 daje MAC `02:53:49:4F:00:01`. IDLE ma DHCP z fallbackiem
-`192.168.1.50/24`, bramą/DNS `192.168.1.1`. Pliki `.eep` i `.json` znajdują się
-w `build/provision/0001.*`. Bootloader sam nie tworzy wpisu przy pustym EEPROM.
-[Pełny format i zasady recovery](EEPROM.md).
+Serial `0001` produces MAC `02:53:49:4F:00:01`. Factory settings are IDLE,
+DHCP with fallback `192.168.1.50/24`, gateway and DNS `192.168.1.1`.
+Generated device files are stored in `build/provision/`. All units share the
+fallback IP; do not use it simultaneously on the same subnet. See [EEPROM](EEPROM.md).
 
-## Przydatne opcje
+## Script options
 
 ```powershell
-# Build + generowanie EEPROM + podgląd, bez dostępu do sprzętu:
+# Build, generate EEPROM and print commands without accessing hardware.
 .\buildAndProgram.ps1 -SerialNumber 0001 -DryRun
-# Inna brama/DNS i konkretny programator USB:
-.\buildAndProgram.ps1 -SerialNumber 0001 -Gateway 192.168.1.254 -Dns 192.168.1.254 -Port 'usb:000200212345'
-# Własny interpreter:
+# Override gateway and DNS.
+.\buildAndProgram.ps1 -SerialNumber 0001 -Gateway 192.168.1.254 -Dns 192.168.1.254
+# Select a Python installation.
 .\build.ps1 -Python 'C:\Python313\python.exe'
 ```
 
-Oba skrypty obsługują `-SkipTests` (kontrola rozmiaru pozostaje).
-Programujący ma również `-Avrdude`, `-AvrdudeConfig`, `-BitClock` (domyślnie 10 us).
-Jeżeli PowerShell blokuje skrypt, można uruchomić zaufaną lokalną kopię jednorazowo:
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1`.
+Both scripts accept `-SkipTests`; Flash bounds checks remain enabled.
+The programming script also accepts `-Avrdude`, `-AvrdudeConfig`, `-Port`
+(default `usb`, optionally `usb:PROGRAMMER_SERIAL`) and `-BitClock` (default 10 us).
+If local execution policy blocks a trusted script, invoke it once with:
 
-## 5. Aplikacja przez CH340
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+```
 
-Odłącz ISP, podłącz USB/UART i zresetuj płytkę. W Arduino IDE wybierz
-**Arduino Mega or Mega 2560 / ATmega2560**, port CH340 i zwykłe Upload.
-Nie używaj „Wypal bootloader”, bo zastąpi nasz kod wersją standardową.
-Parametry avrdude: `-p m2560 -c wiring -b 115200 -D`; maksymalny obraz 253952 B.
+## Upload an application through CH340
 
-Po resecie jest 2-sekundowe okno UART. Upload aplikacji nie kasuje PENDING;
-przy recovery najpierw wgraj kompletną aplikację, dopiero potem napraw rekord.
-Nie przerywaj zasilania podczas instalacji ISP. Testy OTA/power-loss wykonuj
-według [TESTING.md](TESTING.md); poprawny zapis ISP nie dowodzi działania OTA.
+Disconnect ISP, connect USB/UART and reset the board. Select **Arduino Mega or
+Mega 2560 / ATmega2560** and the CH340 port in Arduino IDE, then use **Upload**.
+Do not use **Burn Bootloader**: it replaces this bootloader with the standard one.
+The avrdude settings are `-p m2560 -c wiring -b 115200 -D`; the maximum application
+size is 253952 bytes (248 KiB).
+
+After reset, the bootloader offers a UART window with a 2-second receive timeout.
+Uploading an application does not clear PENDING. During recovery, restore the
+complete application before repairing or clearing its EEPROM request.
+For fault and power-loss tests, use the [validation checklist](TESTING.md).

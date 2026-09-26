@@ -1,18 +1,63 @@
-# HTTP OTA v1
+# OTA protocol
 
-Bootloader działa wyłącznie na żądanie aplikacji. Nie wyszukuje aktualizacji, nie porównuje wersji i nie udostępnia endpointu. Przepływ: UART window → poprawny EEPROM PENDING → reset/init W5500 → DHCP lub konfiguracja statyczna → IPv4 bez DNS / DNS A dla nazwy → TCP → HTTP/1.0 GET → strony Flash → CRC pobrania → CRC readback → IDLE → aplikacja.
+[Documentation](README.md) / OTA
 
-## Sieć
+## Update sequence
 
-Jeden socket W5500, numer 0, używany kolejno jako UDP DHCP, UDP DNS i TCP HTTP. Domyślne 2 KiB RX/TX znajdują się **w W5500**, nie w SRAM AVR. Pozostałe sockety są zamknięte. Nie implementujemy TCP/IP programowo. DNS nie jest rejestrem W5500 — adres serwera znajduje się w 4-bajtowej zmiennej AVR.
+The application requests an update by committing EEPROM metadata and resetting.
+The bootloader does not discover updates, compare versions or expose an endpoint.
 
-DHCP: klient UDP 68, broadcast do 67; DISCOVER/OFFER i REQUEST/ACK, weryfikacja BOOTP, xid, MAC, cookie, długości opcji i server identifier. ACK musi zawierać maskę, router i DNS, zgodny server-id i oferowany adres. Brak wymaganych opcji kończy próbę błędem. Trzy próby każdej fazy, po 2 s na odpowiedź. NAK jest odrzucany; nowa próba pełnego OTA zaczyna nowy DISCOVER. Brak renew/rebind, DHCP option overload, przechowywania lease i detekcji konfliktów ARP.
+```text
+UART recovery window -> valid PENDING record -> W5500 initialization
+-> DHCP or static configuration -> IPv4 literal or DNS A lookup
+-> HTTP GET -> Flash pages -> download CRC -> Flash readback CRC
+-> IDLE -> application
+```
 
-DNS: UDP do pierwszego DNS z DHCP, port 53, trzy próby po 2 s. QTYPE A, QCLASS IN, jedna nazwa, weryfikowane źródło/port/id/question/flags, nazwa właściciela odpowiedzi i długości. Obsługiwane wskaźniki kompresji nazw z limitem liczby kroków; cykle i ucięte dane są odrzucane. Nie obsługuje CNAME chain, AAAA, DNSSEC, EDNS ani przejścia DNS na TCP. Odpowiedź DNS ma zmieścić się w 600 B (klasyczny DNS bez EDNS do 512 B).
+## Network behavior
 
-URL: `http://HOST[:PORT]/PATH`, do 100 B w EEPROM; port 1..65535, domyślnie 80. ASCII, bez spacji/CR/LF/fragmentu `#`, userinfo i IPv6. HOST to nazwa DNS z etykietami do 63 znaków albo adres IPv4, np. `http://192.168.1.20:8080/fw.bin`. IPv4 wymaga dokładnie czterech oktetów 0..255 (1..3 cyfry każdy); zera wiodące są dziesiętne, nie ósemkowe. Host złożony tylko z cyfr i kropek jest traktowany jako adres liczbowy; błędny format kończy próbę bez zapytania DNS. Dla poprawnego IPv4 resolver nie otwiera socketu DNS ani nie wysyła zapytań. Nazwy takie jak `123.example.com` nadal używają DNS. W trybie DHCP klient oczekuje opcji DNS w ACK, ale dostępność serwera DNS nie jest potrzebna dla URL z IP. Tryb 1 umożliwia fallback na konfigurację statyczną po błędzie DHCP, a tryb 2 pomija DHCP całkowicie. Wszystkie dane sieciowe są częścią jednego rekordu OTA w EEPROM. Root `/` i query string są obsługiwane; kod nie wykonuje percent-encoding, więc URL musi być już zakodowany przez backend.
+Socket 0 is reused sequentially for DHCP, DNS and HTTP. Its 2 KiB RX and TX
+buffers reside in the W5500, not AVR SRAM. Other sockets remain closed.
+TCP/IP runs in the controller; the DNS server address is a four-byte AVR variable.
 
-## HTTP
+| Service | Behavior | Limits |
+|---|---|---|
+| DHCP | UDP 68 to broadcast port 67; DISCOVER/OFFER and REQUEST/ACK | Three attempts per phase; 2-second response windows |
+| DNS | UDP port 53; one server; A/IN query | Three attempts; 2-second response windows |
+| HTTP | Outbound TCP; HTTP/1.0 GET | 3-second connect, send and receive-inactivity timeouts |
+
+DHCP validates BOOTP fields, transaction ID, MAC, cookie, option lengths and
+server identifier. ACK must match the offer and include subnet mask, router and
+DNS. Missing required options fail the attempt. NAK is rejected; the next full
+OTA attempt starts with DISCOVER. Lease renewal/rebinding, option overload,
+lease persistence and ARP conflict detection are not implemented.
+
+DNS verifies source IP/port, ID, flags, question, answer owner and lengths.
+Name compression is supported with a bounded pointer traversal; cycles and
+truncated messages are rejected. No CNAME chain, AAAA, DNSSEC, EDNS or TCP fallback
+is supported. Replies must fit the 600-byte packet buffer (classic DNS is 512 bytes).
+
+Network modes are DHCP only, DHCP with static fallback, or forced static.
+The complete configuration lives in the [EEPROM record](EEPROM.md).
+Even for an IPv4 URL, DHCP mode requires the DNS option in ACK; reaching that
+DNS server is unnecessary when the URL contains an IP address.
+
+## URL contract
+
+Use `http://HOST[:PORT]/PATH`, up to 100 ASCII bytes. Port defaults to 80 and must
+be in 1–65535. Spaces, control characters, non-ASCII bytes, fragments (`#`),
+userinfo and IPv6 are unsupported. Host labels are limited to 63 characters.
+Root `/` and query strings are supported. Supply any required percent-encoding
+in the backend; the bootloader does not perform it.
+
+An IPv4 literal requires four decimal octets, each 1–3 digits and 0–255. Leading
+zeroes are decimal, not octal. Numeric-only hosts are parsed as IPv4 and never
+sent to DNS, even when malformed. `123.example.com` still uses DNS.
+
+The application API and metadata generator reject invalid URLs before committing
+PENDING. A valid IPv4 URL skips the DNS socket entirely.
+
+## HTTP response contract
 
 ```http
 GET /firmware/mega.bin HTTP/1.0
@@ -21,16 +66,39 @@ Connection: close
 
 ```
 
-Na przewodzie każda linia ma CRLF. Serwer odpowiada HTTP/1.0 lub HTTP/1.1 ze statusem 200 i **dokładnie jednym** Content-Length równym EEPROM image_size, większym od 0 i nie większym od 253952. Nazwy nagłówków są case-insensitive. Obsługiwane końcowe CRLFCRLF. Limit nagłówków 2048 B łącznie, linii 255 B. Nadmiarowe/długie nagłówki powodują błąd. Każdy Transfer-Encoding lub Content-Encoding jest odrzucany. Brak TLS, redirectów, chunked, gzip, auth, POST, cookies i JSON w bootloaderze. Nieznane zwykłe nagłówki są pomijane.
+Lines use CRLF on the wire. The response must meet all these requirements:
 
-Timeout połączenia TCP 3 s, bezczynności odbioru 3 s, operacji SEND 3 s; komendy W5500 mają ograniczony czas oczekiwania. Nie ma absolutnego deadline całej aktualizacji — powolny serwer dostarczający regularnie dane może wydłużyć próbę. Reset/DTR zawsze otwiera ponownie okno UART.
+- HTTP/1.0 or HTTP/1.1 status **200**.
+- Exactly one **Content-Length**, equal to EEPROM `image_size`, from 1 to 253952.
+- CRLFCRLF header termination; at most 2048 header bytes and 255 bytes per line.
+- No Transfer-Encoding or Content-Encoding header; either is rejected.
 
-## Flash i recovery
+Header names are case-insensitive. Unknown ordinary headers are ignored.
+TLS, redirects, chunking, compression, authentication, cookies, multipart, POST
+and JSON are not implemented. There is no absolute transfer deadline: a server
+that keeps sending data can extend an attempt. Reset/DTR reopens UART recovery.
 
-Body odbierane w buforze 600 B, następnie uzupełnia stronę 256 B. Każda strona jest kasowana i zapisywana z przerwaniami wyłączonymi. Ostatnia niepełna strona dopełniana `0xFF`. Strony po końcu obrazu nie są kasowane; nie są częścią CRC ani nowego firmware. Wszystkie adresy SPM przechodzą wspólny zakres `0 <= address`, `address+256 <= 0x3E000` i kontrolę wyrównania. Ochrona dotyczy również STK500v2. Lock bits zapewniają dodatkową blokadę sekcji boot.
+## Programming and recovery
 
-CRC32 jest liczone z dokładnie image_size bajtów body. Następnie bootloader czyta dokładnie ten zakres Flash i ponownie liczy CRC32. Przy błędzie HTTP, timeout, niezgodnym rozmiarze, CRC lub SPM nie usuwa PENDING i nie skacze do aplikacji. LED D13 zostaje zaświecona, następuje kolejne okno UART i ponowienie pełnego OTA. Po restarcie pobieranie zawsze zaczyna się od bajtu 0, bez Range/resume.
+The body streams through a 600-byte buffer into a 256-byte Flash page buffer.
+Each page is erased and written with interrupts disabled. The final partial page
+is padded with `0xFF`. Pages beyond the image remain unchanged and are excluded
+from CRC. Every SPM write is aligned and bounded by `address + 256 <= 0x3E000`.
+These checks also protect UART writes; lock bits provide additional protection.
 
-Po odebraniu Content-Length dodatkowe bajty po body nie należą do obrazu; połączenie jest zamykane. Content-Length i CRC stanowią kontrakt pliku. Backend powinien serwować niezmienny zasób na czas całego procesu, bez dynamicznej kompresji, redirectów i CDN wymagającego HTTPS. W pliku BIN nie ma nagłówka firmowego ani Intel HEX.
+CRC32 covers exactly `image_size` received bytes, followed by a second CRC over
+the same range read from Flash. Only two successful comparisons allow IDLE.
+HTTP errors, timeouts, size mismatch, CRC mismatch or programming failure leave
+PENDING set and prevent application startup. D13 lights, a new UART window opens,
+and a complete OTA attempt follows. Restart always downloads from byte zero;
+HTTP Range and partial resume are unsupported.
 
-**CRC32 nie jest mechanizmem autentyczności.** HTTP i metadane mogą zostać zmodyfikowane przez aktywnego przeciwnika. Ten etap nie zapewnia podpisów ani TLS. Recovery nie jest rollbackiem: podczas zapisu poprzednia aplikacja zostaje zniszczona; bez sprawnego serwera urządzenie pozostaje w recovery i można je naprawić przez UART/ISP.
+Bytes after Content-Length are not part of the image. The connection closes once
+the image is consumed. Serve an immutable raw BIN with no vendor header or Intel
+HEX encoding, and avoid compression, redirects or HTTPS-only hosting.
+
+**CRC32 checks integrity, not authenticity.** An active attacker can alter HTTP
+traffic and metadata. This version implements neither signatures nor TLS.
+Recovery is not rollback: programming destroys the previous application. If the
+server remains unavailable, recover through UART/ISP. Interrupted request creation
+and corrupted EEPROM have additional rules described in [EEPROM](EEPROM.md).

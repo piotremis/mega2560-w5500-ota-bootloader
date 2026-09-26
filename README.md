@@ -2,7 +2,7 @@
 
 **Version 1.0.0** · [Changelog](CHANGELOG.md)
 
-[Polski](README.pl.md) · [Installation](docs/INSTALL.md) · [Licenses](LICENSES.md)
+[Documentation](docs/README.md) · [Installation](docs/INSTALL.md) · [Licenses](LICENSES.md)
 
 Bare-metal C bootloader for **ATmega2560, 16 MHz**, based on Arduino STK500v2.
 It supports normal Arduino Mega uploads over UART0/CH340 and application-requested

@@ -38,16 +38,16 @@ counts = collections.Counter()
 detail = []
 for (a, n), loc in zip(ins, locations):
     filename = re.split(r"[/\\]", loc.rsplit(":", 1)[0])[-1]
-    cat = categories.get(filename, "inne")
+    cat = categories.get(filename, "Other")
     counts[cat] += n
     detail.append(f"{a:05x}\t{n}\t{cat}\t{loc}")
 size = json.loads((out / "size.json").read_text())
-counts["inne"] += size["flash_bytes"] - sum(counts.values())
+counts["Other"] += size["flash_bytes"] - sum(counts.values())
 assert sum(counts.values()) == size["flash_bytes"]
 (out / "attribution.tsv").write_text("\n".join(detail) + "\n")
 (out / "modules.json").write_text(json.dumps(counts, indent=2))
 table = (
-    "| Element | Bytes |\n|---|---:|\n"
+    "| Component | Bytes |\n|---|---:|\n"
     + "".join(
         f"| {k} | {counts[k]} |\n"
         for k in (
@@ -59,13 +59,13 @@ table = (
             "OTA",
             "EEPROM",
             "CRC32",
-            "inne",
+            "Other",
         )
     )
     + f"| **TOTAL** | **{sum(counts.values())}** |\n| LIMIT | 8192 |\n"
 )
 stages = (
-    "| Etap | Flash B | statyczny SRAM B | koniec wyłączny |\n|---|---:|---:|---|\n"
+    "| Stage | Flash bytes | Static SRAM bytes | Flash end (exclusive) |\n|---|---:|---:|---|\n"
 )
 for s in (
     "official",
@@ -85,13 +85,14 @@ for s in (
         d = json.loads(p.read_text())
         stages += f"| {s} | {d['flash_bytes']} | {d['static_sram_bytes']} | {d['flash_end_exclusive']} |\n"
 doc = (
-    "# Wynik pomiarów\n\n"
+    "# Memory report\n\n[Documentation](README.md) / Memory\n\n"
     + table
-    + "\nRozliczenie rzeczywistych instrukcji finalnego ELF według informacji DWARF. LTO przenosi i scala kod; to atrybucja adresów, nie suma niezależnie linkowanych bibliotek. `inne` obejmuje startup, platformę AVR, libc/libgcc, inicjalizatory `.data` i padding. Każdy bajt policzono raz. Szczegóły: `build/final/attribution.tsv`.\n\n"
+    + "\nInstruction attribution uses DWARF information from the final ELF. LTO moves and merges code; these are attributed address ranges, not independently linked library sizes. Other includes startup, the AVR platform, libc/libgcc, data initializers and padding. Every byte is counted once. Details: `build/final/attribution.tsv`.\n\n"
     + stages
 )
-doc += "\nAtrybucja jest według plików: CRC32 obejmuje również helper `range_ok` umieszczony w crc32.c. OTA obejmuje logikę strumieniowania/weryfikacji; wspólne instrukcje SPM z platform.c są w `inne`, ponieważ służą też STK500v2.\n"
-doc += "\nWczesne buildy przekroczyły limit: HTTP bez współdzielonych prologów 8284 B (92 B ponad limit), streaming przed LTO 8272 B (80 B ponad limit). Zastosowano `-mcall-prologues`, następnie LTO, zachowując funkcje. Tabela pokazuje ponownie zmierzone etapy z finalnymi flagami. Recovery wdrożono już przy integracji EEPROM/SPM; etap recovery potwierdza istniejący mechanizm i nie dodaje sztucznego przyrostu kodu. Buildy pośrednie są tylko pomiarowe; do instalacji służy wyłącznie `build/final/bootloader.hex`.\n"
-doc += f"\nFinal: {size['flash_bytes']} B, ostatni zajęty adres `0x{int(size['flash_end_exclusive'], 16) - 1:05X}`, {size['flash_free']} B wolnego Flash. Statyczny SRAM {size['static_sram_bytes']} B; {size['sram_before_stack']} B pozostaje przed uwzględnieniem stosu.\n"
+doc += "\nStage rows are included only when their local size reports exist. Run `make official` and `make stages` before this report for the full comparison. Only the final image is intended for installation.\n"
+doc += "\nAttribution follows source files: CRC32 includes the range_ok helper. OTA covers streaming and verification; shared SPM code in platform.c is counted under Other because serial programming also uses it.\n"
+doc += "\nEarly builds exceeded the limit: HTTP without shared prologues used 8284 bytes (92 over), and streaming before LTO used 8272 bytes (80 over). Shared prologues and LTO reduced size without removing required features. Recovery was integrated with EEPROM/SPM; its measurement stage adds no artificial code. Install only `build/final/bootloader.hex`.\n"
+doc += f"\nFinal: {size['flash_bytes']} bytes, last occupied address `0x{int(size['flash_end_exclusive'], 16) - 1:05X}`, {size['flash_free']} bytes of free Flash. Static SRAM: {size['static_sram_bytes']} bytes; {size['sram_before_stack']} bytes remain before stack use. See [validation](TESTING.md) for stack considerations.\n"
 (ROOT / "docs/SIZE.md").write_text(doc, encoding="utf-8")
 print(table)

@@ -32,7 +32,6 @@ files += [
     ROOT / "buildAndProgram.ps1",
     ROOT / "LICENSE",
     ROOT / "LICENSES.md",
-    ROOT / "README.pl.md",
     ROOT / "CONTRIBUTING.md",
     ROOT / ".gitignore",
     ROOT / ".gitattributes",
